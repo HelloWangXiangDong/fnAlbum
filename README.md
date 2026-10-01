@@ -30,7 +30,7 @@ ARM 电视盒子都能直接装，不用为架构挑包。
 - [从源码构建](#从源码构建)
 - [项目结构](#项目结构)
 - [技术说明](#技术说明)
-- [调试与测试](#调试与测试)
+- [调试与构建](#调试与构建)
 - [更新日志](#更新日志)
 - [贡献](#贡献)
 - [免责声明](#免责声明)
@@ -256,18 +256,13 @@ app/src/main/java/com/fnalbum/tv/
 
 > 本项目只调用用户自有设备上的接口，不包含任何服务端代码，也不绕过任何付费 / 授权机制。
 
-## 调试与测试
+## 调试与构建
 
-仓库 `tools/` 下带了一组回归脚本，全部在雷电模拟器上实测跑通过：
+仓库 `tools/` 下保留两个辅助脚本：
 
 | 脚本 | 用途 |
 | --- | --- |
-| `tools/quick-login-test.sh` | 构建 → 安装 → 清空登录态 → 自动填表登录 → 输出日志与截图 |
-| `tools/qr-login-test.sh` | 扫码登录全链路回归（15 项断言） |
-| `tools/remote-test.sh` | 遥控器方向键 / OK / 返回 / 菜单键回归 |
-| `tools/remote-test2.sh` | 宫格样式切换、相册选择、新增账号弹窗回归 |
-| `tools/menu-key-test.sh` | 用 UI 视图树判定各「菜单类」按键是否生效 |
-| `tools/make-screenshots.py` | 把 `_shots/` 里的原始截图压成 README 用的图 |
+| `tools/make-screenshots.py` | 把 `_shots/` 里的原始截图打码脱敏并压到 100 KB 以内 |
 | `tools/make-release.py` | 打 tag、创建 GitHub Release 并上传 APK |
 
 用法见 **[docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)**（含模拟器联调、按键注入、Git Bash 踩坑）。
@@ -284,7 +279,7 @@ app/src/main/java/com/fnalbum/tv/
 
 欢迎 Issue 和 PR。提 PR 前建议：
 
-1. 跑一遍 `tools/` 下受影响的回归脚本；
+1. 在雷电模拟器或真机上手动过一遍受影响的交互（登录、遥控器按键、全屏查看等）；
 2. 保持「零 native 依赖」，不要引入带 `.so` 的库；
 3. 新增设置项时记得落到 `Prefs.kt`，并保证遥控器可以完整操作。
 

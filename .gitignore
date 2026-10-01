@@ -20,6 +20,10 @@ _*.png
 _*.jpg
 _*.py
 
+# ---- 本地调试脚本（含真实账号，刻意不入库）----
+tools/*-test.sh
+tools/remote-test*.sh
+
 # ---- 系统 ----
 .DS_Store
 Thumbs.db

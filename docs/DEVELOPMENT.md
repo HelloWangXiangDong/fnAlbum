@@ -7,7 +7,7 @@
 | JDK | 17 | 编译目标也是 17 |
 | Android SDK | Platform 34 / Build-Tools 34 | `local.properties` 里配 `sdk.dir` |
 | Gradle | 8.12 | 命令行构建；Android Studio 用自带 wrapper 也行 |
-| adb | 随 SDK | 脚本里默认读 `C:/Android/Sdk/platform-tools/adb.exe` |
+| adb | 随 SDK | 下文示例按 `C:/Android/Sdk/platform-tools/adb.exe` 走 |
 
 首次构建前创建 `local.properties`：
 
@@ -74,52 +74,38 @@ adb logcat -s FnAlbum:* AndroidRuntime:E
 > 还不行就重启实例。**不要**在模拟器里跑 `svc wifi disable` 之类的命令，
 > 会让 adb shell 挂起，只能重启实例才能恢复。
 
-## 回归测试脚本
+## 联调与验证
 
-`tools/` 下的脚本默认读环境变量，路径都可以覆盖：
+改完代码后，用 adb 就能把主要交互过一遍。
 
-| 变量 | 默认值 | 说明 |
-| --- | --- | --- |
-| `ADB` | `C:/Android/Sdk/platform-tools/adb.exe` | adb 路径 |
-| `SHOTS` | `<repo>/_shots` | 截图输出目录 |
-| `FN_HOST` / `FN_PORT` | 无 / `5666` | 飞牛服务器地址与端口 |
-| `FN_USER` / `FN_PASS` | 无 | 测试账号，**必须自己传入** |
-
-> 脚本里**没有内置任何默认账号密码**，缺参数会直接报错退出。
-
-### 登录回归
+**复现首次启动的登录弹窗**（清空登录态与已存账号）：
 
 ```bash
-FN_HOST=192.168.1.100 FN_USER=admin FN_PASS=secret bash tools/quick-login-test.sh
+adb shell pm clear com.fnalbum.tv
+adb shell am start -n com.fnalbum.tv/.MainActivity
 ```
 
-构建 → 安装 → 清空登录态 → 自动填表登录 → 输出日志与截图。
-
-### 扫码登录回归（15 项断言）
+**注入遥控器按键**：
 
 ```bash
-FN_HOST=192.168.1.100 FN_USER=admin FN_PASS=secret bash tools/qr-login-test.sh
-SKIP_INSTALL=1 FN_HOST=... FN_USER=... FN_PASS=... bash tools/qr-login-test.sh
+adb shell input keyevent 22    # 右
+adb shell input keyevent 20    # 下
+adb shell input keyevent 23    # OK
+adb shell input keyevent 4     # 返回
 ```
 
-链路：清空登录态启动 → 从日志取出二维码 URL → `adb forward` 把端口映射到本机 →
-用 `curl` 冒充手机依次验证「填写页 / 错误 token 404 / 根路径 302 / 空字段被拒 / 正常提交」→
-校验 TV 端自动登录成功、服务自动关闭、端口已释放、崩溃数为 0。
+菜单类按键的四种键码见下一节。
 
-### 遥控器交互回归
+**扫码登录联调**：手机与电视在同一局域网即可，直接扫码走完整链路。想在电脑上
+模拟手机提交，可以先用 `adb forward` 把电视端端口映射到本机（端口从日志里取，
+默认取 8765–8768 中第一个可用的）：
 
 ```bash
-bash tools/remote-test.sh     # 方向键 / OK / 返回 / 菜单
-bash tools/remote-test2.sh    # 宫格切换 / 相册选择 / 新增账号
+adb forward tcp:8765 tcp:8765
+curl http://127.0.0.1:8765/            # 手机填写页
 ```
 
-### 菜单键检测
-
-```bash
-bash tools/menu-key-test.sh
-```
-
-原理：`uiautomator dump` 出视图树，看菜单弹窗特有的「切换相册」文案是否出现。
+> 应用内**不内置任何测试账号**，登录信息一律由使用者在弹窗里填写。
 
 ## 菜单键怎么测
 
