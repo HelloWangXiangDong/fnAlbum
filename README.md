@@ -55,17 +55,23 @@ ARM 电视盒子都能直接装，不用为架构挑包。
 
 ## 截图
 
-| 登录弹窗 | 扫码登录 | 首页网格 |
-| --- | --- | --- |
-| ![登录弹窗](docs/screenshots/01-login.png) | ![扫码登录](docs/screenshots/02-qr-login.png) | ![首页网格](docs/screenshots/03-grid.png) |
+电视实机拍摄效果（手机拍的，十二宫格）：
 
-| 菜单键 | 全屏查看 | 视频播放 |
-| --- | --- | --- |
-| ![菜单](docs/screenshots/05-menu.png) | ![全屏查看](docs/screenshots/06-viewer.png) | ![视频播放](docs/screenshots/07-video.png) |
+![电视实机效果](docs/screenshots/03-grid.png)
 
-| 实况照片 | 十二宫格 | 新增账号 |
+模拟器 1920×1080 界面截图：
+
+| 登录弹窗 | 扫码登录 | 菜单键 |
 | --- | --- | --- |
-| ![实况照片](docs/screenshots/08-live.png) | ![十二宫格](docs/screenshots/04-grid12.png) | ![新增账号](docs/screenshots/09-add-account.png) |
+| ![登录弹窗](docs/screenshots/01-login.png) | ![扫码登录](docs/screenshots/02-qr-login.png) | ![菜单](docs/screenshots/05-menu.png) |
+
+| 全屏查看 | 视频播放 | 实况照片 |
+| --- | --- | --- |
+| ![全屏查看](docs/screenshots/06-viewer.png) | ![视频播放](docs/screenshots/07-video.png) | ![实况照片](docs/screenshots/08-live.png) |
+
+| 新增账号 | 十二宫格 | |
+| --- | --- | --- |
+| ![新增账号](docs/screenshots/09-add-account.png) | ![十二宫格](docs/screenshots/04-grid12.png) | |
 
 ## 下载安装
 
