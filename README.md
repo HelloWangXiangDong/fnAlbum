@@ -55,23 +55,26 @@ ARM 电视盒子都能直接装，不用为架构挑包。
 
 ## 截图
 
+> 截图中的照片内容（人脸、车牌、行程）均已打马赛克，界面本身保持原样。
+> 全部图片已压缩到 100 KB 以内，方便快速加载。
+
 电视实机拍摄效果（手机拍的，十二宫格）：
 
-![电视实机效果](docs/screenshots/03-grid.png)
+![电视实机效果](docs/screenshots/03-grid.jpg)
 
 模拟器 1920×1080 界面截图：
 
 | 登录弹窗 | 扫码登录 | 菜单键 |
 | --- | --- | --- |
-| ![登录弹窗](docs/screenshots/01-login.png) | ![扫码登录](docs/screenshots/02-qr-login.png) | ![菜单](docs/screenshots/05-menu.png) |
+| ![登录弹窗](docs/screenshots/01-login.jpg) | ![扫码登录](docs/screenshots/02-qr-login.jpg) | ![菜单](docs/screenshots/05-menu.jpg) |
 
 | 全屏查看 | 视频播放 | 实况照片 |
 | --- | --- | --- |
-| ![全屏查看](docs/screenshots/06-viewer.png) | ![视频播放](docs/screenshots/07-video.png) | ![实况照片](docs/screenshots/08-live.png) |
+| ![全屏查看](docs/screenshots/06-viewer.jpg) | ![视频播放](docs/screenshots/07-video.jpg) | ![实况照片](docs/screenshots/08-live.jpg) |
 
 | 新增账号 | 十二宫格 | |
 | --- | --- | --- |
-| ![新增账号](docs/screenshots/09-add-account.png) | ![十二宫格](docs/screenshots/04-grid12.png) | |
+| ![新增账号](docs/screenshots/09-add-account.jpg) | ![十二宫格](docs/screenshots/04-grid12.jpg) | |
 
 ## 下载安装
 

@@ -16,6 +16,9 @@ _shots/
 _qrpage.html
 _crop*.png
 _sheet.png
+_*.png
+_*.jpg
+_*.py
 
 # ---- 系统 ----
 .DS_Store
