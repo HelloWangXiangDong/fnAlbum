@@ -16,7 +16,7 @@
 import os
 import statistics
 
-from PIL import Image
+from PIL import Image, ImageFilter
 
 ROOT = r"C:\tools\fnAlbum"
 SRC = os.path.join(ROOT, "_shots")
@@ -24,6 +24,7 @@ DST = os.path.join(ROOT, "docs", "screenshots")
 SPONSOR = os.path.join(ROOT, "docs", "sponsor")
 
 W = 1280
+PHOTO_W = 1024      # 实拍照片用 1024 宽：手机拍屏噪点重，1280 宽只能压到 q≈52，反而更糊
 MAX_KB = 100
 BLOCK = 20          # 马赛克格子边长
 
@@ -65,7 +66,19 @@ ERASE = {
 }
 
 # ---- B. 实拍图（非截图）-----------------------------------------------------
-PHOTO_JOBS = [("03-grid.jpg", "03-grid.png"), ("04-grid12.jpg", "04-grid12.png")]
+# 电视实机照片：手机拍屏后在导出工具里把账号那一行涂掉，另外裁掉顶部露出的墙面
+# （1956x1140 里去掉顶部 40px 正好是 16:9），再压到 100 KB 以内。
+# 源图放在 _shots/（该目录不进仓库），保证本脚本可以重跑。
+PHOTO_JOBS = [
+    ("03-grid.jpg", "tv-grid.png", 40),
+    ("04-grid12.jpg", "tv-grid.png", 40),
+]
+
+# 源图里账号那一段（wxd@…xyz）在导出时被半透明涂黑，实测仍能看出文字轮廓
+# （放大后能辨认出域名尾部）。这里按列取标题栏内的背景色把它整段盖掉，
+# 右侧端口 :5666 保持可见。坐标是源图像素，改图后需要重新量。
+PHOTO_ERASE = (1438, 50, 1826, 128)
+ERASE_SAMPLE_Y = (122, 136)      # 取背景色的 y 区间：标题栏内、文字下方、栏底之上
 
 
 def median_bg(im, box):
@@ -109,6 +122,39 @@ def prepare_shot(src):
     return im
 
 
+def fill_from_below(im, box, sample_y):
+    """把矩形区域按列用下方的背景色填平 —— 保留标题栏自身的横向渐变，看不出补丁。"""
+    x0, y0, x1, y1 = box
+    sy0, sy1 = sample_y
+    src = im.crop((x0, sy0, x1, sy1)).load()
+    n = sy1 - sy0
+    for i in range(x1 - x0):
+        color = tuple(sum(src[i, y][c] for y in range(n)) // n for c in range(3))
+        im.paste(color, (x0 + i, y0, x0 + i + 1, y1))
+    return im
+
+
+def prepare_photo(src, top_crop=0):
+    """实拍照片：盖掉账号、裁成 16:9、降噪，再缩到 1024 宽。"""
+    im = Image.open(os.path.join(SRC, src)).convert("RGB")   # convert 顺带丢掉 EXIF / ICC
+    im = fill_from_below(im, PHOTO_ERASE, ERASE_SAMPLE_Y)
+
+    if top_crop:
+        im = im.crop((0, top_crop, im.width, im.height))
+
+    w, h = im.size
+    if h * 16 > w * 9:                        # 太高：上下各裁一点
+        d = (h - w * 9 / 16) / 2
+        im = im.crop((0, int(d), w, int(h - d)))
+    elif h * 16 < w * 9:                      # 太宽：左右各裁一点
+        d = (w - h * 16 / 9) / 2
+        im = im.crop((int(d), 0, int(w - d), h))
+
+    # 手机拍屏的传感器噪点最吃码率，轻微降噪能省掉约 10% 体积，肉眼几乎看不出
+    im = im.filter(ImageFilter.SMOOTH).filter(ImageFilter.GaussianBlur(0.5))
+    return im.resize((PHOTO_W, PHOTO_W * 9 // 16), Image.LANCZOS)
+
+
 def main():
     os.makedirs(DST, exist_ok=True)
 
@@ -121,14 +167,12 @@ def main():
         q, kb = save_under(prepare_shot(src), os.path.join(DST, name))
         print(f"   {name:22s} q={q:2d}  {kb:6.1f} KB")
 
-    print("B. 实拍图（只压缩）")
-    for out, src in PHOTO_JOBS:
-        p = os.path.join(DST, src)
-        if not os.path.exists(p):
-            print(f"   跳过 {out}（没有 {src}）")
+    print("B. 实拍图（裁剪 + 压缩）")
+    for out, src, top in PHOTO_JOBS:
+        if not os.path.exists(os.path.join(SRC, src)):
+            print(f"   跳过 {out}（_shots 里没有 {src}）")
             continue
-        im = Image.open(p).convert("RGB").resize((W, W * 9 // 16), Image.LANCZOS)
-        q, kb = save_under(im, os.path.join(DST, out))
+        q, kb = save_under(prepare_photo(src, top), os.path.join(DST, out))
         print(f"   {out:22s} q={q:2d}  {kb:6.1f} KB")
 
     print("C. 收款码（只压缩，保持可扫）")
