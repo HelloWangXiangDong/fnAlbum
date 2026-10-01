@@ -1,0 +1,4 @@
+-dontwarn okhttp3.**
+-dontwarn okio.**
+-dontwarn coil.**
+-keep class com.fnalbum.tv.** { *; }
