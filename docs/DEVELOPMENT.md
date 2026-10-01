@@ -196,3 +196,24 @@ python tools/make-screenshots.py
 ```
 
 把 `_shots/` 下的原始 1920×1080 截图压成 1280 宽的 JPEG，输出到 `docs/screenshots/`。
+
+脚本还会顺手把登录框里的 hint 文案区域用输入框底色盖掉 —— 早期截图里的占位文字是
+开发者自己的内网地址，不适合随仓库公开。盖之前会自动定位输入框的蓝色边框，
+再在框内找文本像素，所以换一批截图也能直接跑。
+
+## 发布新版本
+
+```bash
+# 1. 改 app/build.gradle.kts 里的 versionCode / versionName
+# 2. 构建并放到 dist/
+gradle :app:assembleDebug
+cp app/build/outputs/apk/debug/app-debug.apk dist/FnAlbum-TV-v1.3.apk
+
+# 3. 打 tag + 建 Release + 传 APK（一条命令搞定）
+GH_TOKEN=<你的 PAT> python tools/make-release.py 1.3
+
+# 4. 推送 tag
+git push origin v1.3
+```
+
+PAT 只需要 `repo` 权限。**不要把 Token 写进文件或提交到仓库**，通过环境变量传入即可。

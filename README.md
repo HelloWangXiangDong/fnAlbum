@@ -262,6 +262,7 @@ app/src/main/java/com/fnalbum/tv/
 | `tools/remote-test2.sh` | 宫格样式切换、相册选择、新增账号弹窗回归 |
 | `tools/menu-key-test.sh` | 用 UI 视图树判定各「菜单类」按键是否生效 |
 | `tools/make-screenshots.py` | 把 `_shots/` 里的原始截图压成 README 用的图 |
+| `tools/make-release.py` | 打 tag、创建 GitHub Release 并上传 APK |
 
 用法见 **[docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)**（含模拟器联调、按键注入、Git Bash 踩坑）。
 
