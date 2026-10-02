@@ -5,6 +5,18 @@
     android:layout_height="match_parent"
     android:background="#000000">
 
+    <!--
+        顺序很重要：VideoView 必须排在下面，静态图排在它**之上**。
+        VideoView 内部是 SurfaceView，会把自己的区域挖空，绘制在它之前的兄弟视图会被清掉；
+        只有排在后面对兄弟视图才能盖住它。播放加载期间就靠这层静态图遮住视频的黑底。
+    -->
+    <VideoView
+        android:id="@+id/video"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:layout_gravity="center"
+        android:visibility="gone" />
+
     <ImageView
         android:id="@+id/imgFull"
         android:layout_width="match_parent"
@@ -12,14 +24,6 @@
         android:scaleType="fitCenter"
         android:adjustViewBounds="true"
         android:contentDescription="photo" />
-
-    <!-- 视频 / 动图播放层，仅在播放时显示 -->
-    <VideoView
-        android:id="@+id/video"
-        android:layout_width="match_parent"
-        android:layout_height="match_parent"
-        android:layout_gravity="center"
-        android:visibility="gone" />
 
     <ProgressBar
         android:id="@+id/progress"

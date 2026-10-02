@@ -159,6 +159,26 @@ adb shell getevent -lt
 
 逐个按键，输出里出现 `KEY_COMPOSE` 或 `KEY_MENU` 的那个键就是菜单键。
 
+## 播放画面什么时候才揭开
+
+`VideoView` 从 `setVideoURI()` 到 `onPrepared()` 之间有几秒钟在拉流，这段时间它的画面是
+**黑底**。如果这时就把静态图藏起来，用户看到的就是「黑屏 + loading 转几秒」，体验很差。
+
+正确做法是**准备阶段不揭开画面**：静态图一直留着、只在中间转 loading，等首帧真正渲染
+出来再切换。两个关键点：
+
+1. **静态图必须排在 VideoView 后面（也就是在它上面）。** `VideoView` 内部是
+   `SurfaceView`，会把自己的区域挖空——绘制在它**之前**的兄弟视图会被清掉，只有排在
+   **之后**的才能盖住它。所以 `activity_viewer.xml` 里 `video` 在前、`imgFull` 在后，
+   顺序不能反。
+2. **`video` 在准备期间必须保持 `VISIBLE`。** `SurfaceView` 不可见时不会创建 surface，
+   `prepareAsync()` 也就不会被调用，`onPrepared()` 永远不来，loading 会一直转。
+   它被静态图盖住，用户看不见，放心让它 VISIBLE。
+
+揭开时机用 `MediaPlayer.MEDIA_INFO_VIDEO_RENDERING_START`（首帧渲染完成），但它
+**不是所有片源 / 设备都会上报**，所以再挂一个 600 ms 的兜底计时器。另外给准备阶段加
+20 秒上限，超时退回静态图并提示重试，别让 loading 永远转下去。
+
 ## Git Bash 踩坑
 
 **必须注意路径改写**：Git Bash 会把 `/sdcard/w.xml` 当成路径改写掉，导致

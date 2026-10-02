@@ -1,6 +1,7 @@
 package com.fnalbum.tv
 
 import android.app.Activity
+import android.media.MediaPlayer
 import android.net.Uri
 import android.os.Bundle
 import android.os.Handler
@@ -29,12 +30,21 @@ import kotlinx.coroutines.launch
  * - 视频：进入即自动播放一次；按 OK 再播一次
  * - 动图（Live Photo）：进入时只显示静态图；按 OK 播放一次
  * - 播放结束回到静态图，不会循环
+ *
+ * 加载体验：准备阶段**不揭开播放画面**，静态图一直留在屏幕上、中间转一个 loading，
+ * 等首帧真正渲染出来才切换过去，避免黑屏好几秒。
  */
 class ViewerActivity : Activity() {
 
     private companion object {
         const val VIEW_SIZE = "m"
         const val CHROME_TIMEOUT = 3200L
+
+        /** 准备阶段上限：本地网络下 20 秒还没就绪就放弃，不留一个永远转的 loading */
+        const val PREPARE_TIMEOUT = 20_000L
+
+        /** 首帧渲染回调不是所有片源都上报，用这个兜底计时保证静态图最终一定会被收掉 */
+        const val REVEAL_FALLBACK_MS = 600L
     }
 
     private lateinit var img: ImageView
@@ -51,10 +61,15 @@ class ViewerActivity : Activity() {
     private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
     private val handler = Handler(Looper.getMainLooper())
     private val hideChrome = Runnable { setChromeAlpha(0f) }
+    private val revealFallback = Runnable { revealVideo() }
+    private val prepareTimeout = Runnable { onPrepareTimeout() }
 
     private var boundId = -1L
     private var loadingMore = false
     private var playing = false
+
+    /** 本次播放是否已经揭开画面（首帧渲染完成）。每播一次重置一次 */
+    private var revealed = false
 
     /** 播放失败过的条目：避免自动播放时反复重试打转 */
     private var failedId = -1L
@@ -192,6 +207,10 @@ class ViewerActivity : Activity() {
     /**
      * 播放一次。不循环，播完自动回到静态图。
      * 视频与动图共用同一条媒体流（/api/v1/stream/v/{id}）。
+     *
+     * 关键点：**准备阶段不揭开画面**。加载过程中静态图一直留在屏幕上，只在中间转一个
+     * loading；等首帧真正渲染出来才把静态图收掉。这样就不会先露出 VideoView 的黑底、
+     * 黑屏好几秒。静态图能盖住视频，靠的是布局里 VideoView 排在静态图下面。
      */
     private fun playOnce() {
         val photo = currentPhoto() ?: return
@@ -204,14 +223,24 @@ class ViewerActivity : Activity() {
         stopPlayback()
 
         playing = true
+        revealed = false
+        // VideoView 必须是 VISIBLE：SurfaceView 不可见时不会创建 surface，
+        // prepareAsync 也就不会被调用。它在布局里位于静态图下方，所以看不见。
         progress.visibility = View.VISIBLE
-        img.visibility = View.INVISIBLE
+        img.visibility = View.VISIBLE
         video.visibility = View.VISIBLE
 
         video.setOnPreparedListener { mp ->
+            if (!playing) return@setOnPreparedListener
             mp.isLooping = false
-            progress.visibility = View.GONE
             video.start()
+            // 兜底：MEDIA_INFO_VIDEO_RENDERING_START 不是所有片源 / 设备都会上报
+            handler.removeCallbacks(revealFallback)
+            handler.postDelayed(revealFallback, REVEAL_FALLBACK_MS)
+        }
+        video.setOnInfoListener { _, what, _ ->
+            if (what == MediaPlayer.MEDIA_INFO_VIDEO_RENDERING_START) revealVideo()
+            false
         }
         video.setOnCompletionListener {
             // 播完即止，回到静态图
@@ -226,6 +255,9 @@ class ViewerActivity : Activity() {
             true
         }
 
+        handler.removeCallbacks(prepareTimeout)
+        handler.postDelayed(prepareTimeout, PREPARE_TIMEOUT)
+
         runCatching { video.setVideoURI(Uri.parse(url), Api.mediaHeaders()) }
             .onFailure {
                 failedId = photo.id
@@ -234,9 +266,35 @@ class ViewerActivity : Activity() {
             }
     }
 
+    /** 首帧已经画出来了：这时才收掉静态图，让视频画面露出来（幂等） */
+    private fun revealVideo() {
+        if (!playing || revealed) return
+        revealed = true
+        handler.removeCallbacks(revealFallback)
+        handler.removeCallbacks(prepareTimeout)
+        progress.visibility = View.GONE
+        img.visibility = View.INVISIBLE
+    }
+
+    /** 准备阶段卡太久：放弃播放，退回静态图，别让 loading 一直转 */
+    private fun onPrepareTimeout() {
+        if (!playing || revealed) return
+        stopPlayback()
+        tvHint.text = "加载超时，按 OK 重试"
+        showChrome()
+    }
+
     private fun stopPlayback() {
+        handler.removeCallbacks(revealFallback)
+        handler.removeCallbacks(prepareTimeout)
+        revealed = false
         if (!playing && video.visibility != View.VISIBLE) return
         playing = false
+        // 清掉监听，避免迟到的回调又把播放拉起来
+        video.setOnPreparedListener(null)
+        video.setOnInfoListener(null)
+        video.setOnCompletionListener(null)
+        video.setOnErrorListener(null)
         runCatching { video.stopPlayback() }
         video.visibility = View.GONE
         progress.visibility = View.GONE
