@@ -49,10 +49,11 @@ ARM 电视盒子都能直接装，不用为架构挑包。
 | 🕹️ **顺手的浏览** | ← → 切换照片，↑ ↓ 整页翻页，OK 进全屏；进全屏后 ← → 直接切上一张 / 下一张 |
 | 🎬 **视频播放** | 视频进全屏自动播一次，按 OK 可再播，播完回到静态图 |
 | 🌀 **实况照片（动图）** | iPhone 的 Live Photo 会带「动图」角标，进全屏先看静态图，按 OK 播放一次 |
+| 🔊 **动图带声音** | 播放内核用 Media3/ExoPlayer，能解 iPhone 实况短片里的 `lpcm` 音轨，**不再无声播放** |
 | ⏳ **不黑屏的等待** | 点开后先在原图上转 loading，等视频首帧真正就绪才切过去，**不会先黑屏几秒** |
 | 🏷️ **媒体角标** | 视频显示「▶ 视频」，动图显示「◉ 动图」，都在格子右上角 |
 | ℹ️ **全屏信息栏** | 显示文件名、分辨率、拍摄时间、当前序号 |
-| 🔌 **零 native 依赖** | 纯 JVM 字节码，x86 / armeabi-v7a / arm64 通用，APK 约 3.5 MB |
+| 🔌 **零 native 依赖** | 纯 JVM 字节码，x86 / armeabi-v7a / arm64 通用，APK 约 4.6 MB |
 
 ## 截图
 
@@ -79,7 +80,7 @@ ARM 电视盒子都能直接装，不用为架构挑包。
 从 [Releases](../../releases) 或仓库里的 [`dist/`](dist) 目录取 APK：
 
 ```bash
-adb install -r dist/FnAlbum-TV-v1.3.apk
+adb install -r dist/FnAlbum-TV-v1.3.3.apk
 ```
 
 也可以把 APK 拷进 U 盘插到电视上，用电视自带的文件管理器安装。首次安装需要允许
@@ -170,10 +171,32 @@ adb install -r dist/FnAlbum-TV-v1.3.apk
 </details>
 
 <details>
-<summary><b>为什么不用 ExoPlayer？</b></summary>
+<summary><b>为什么用 Media3/ExoPlayer，而不是系统自带的播放器？</b></summary>
 
-播放用的是系统自带的 `VideoView` + `MediaPlayer`：APK 体积几乎不变、天然支持 http 头部透传，
-并且能直接复用系统的 HEVC 解码器。对「点一次播一次」这种轻量场景完全够用。
+因为**动图短片是没声音的重灾区**。实况照片的短片是 MOV 容器 + `lpcm`（未压缩 PCM）
+音轨，系统 `MediaPlayer` / `MPEG4Extractor` 会把这条音轨整条丢掉：画面照播、完全无声。
+换成 Media3/ExoPlayer 后，它的 `Mp4Extractor` 认得这条抽样条目，声音就回来了。
+
+它同样是纯 JVM 字节码、不带 `.so`，x86 / armeabi-v7a / arm64 通用；代价是 APK 大了约 2 MB。
+</details>
+
+<details>
+<summary><b>动图点开还是没声音？</b></summary>
+
+先确认电视/盒子的**媒体音量**不是 0 或静音（注意不是「通知音量」）。如果音量正常仍无声，
+接 adb 看一眼整条音频链路（播放时会打一行）：
+
+```bash
+adb logcat -s FnAlbumTV:I
+# 音频链路 音轨组=1 已选=1 player音量=1.0 系统媒体音量=5/15 静音=false 输出设备=2:speaker|18:bus
+# AudioTrack: stop(27): called with 136604 frames delivered
+```
+
+`音轨组=0` 说明这条短片服务端侧就没有音轨（NAS 的问题）。如果像上面这样
+**音轨被选中、系统媒体音量不为 0、也没静音，并且有 `frames delivered`**，
+那说明声音已经交给系统了，问题在输出侧：**音频输出模式**是否被设成了
+「透传 / Bitstream」（`lpcm` 是 PCM，透传下会被丢，改成 **PCM / 自动**）、
+有没有蓝牙耳机/音响抢占输出、HDMI 接的是哪个口。
 </details>
 
 <details>
@@ -280,6 +303,9 @@ app/src/main/java/com/fnalbum/tv/
 
 | 版本 | 内容 |
 | --- | --- |
+| **v1.3.3** | 音频自检改为只写日志（`adb logcat -s FnAlbumTV:I` 看「音频链路」那一行），界面上不再显示任何调试标记 |
+| **v1.3.2** | 修复播放画面**被拉伸铺满整屏**：换成 `SurfaceView` 后丢了原来 `VideoView` 自带的比例适配，现按片源比例居中缩放，多余部分留黑边；另外登录日志不再打印明文密码与 token |
+| **v1.3.1** | 修复实况照片短片**没有声音**：动图短片是 MOV 容器 + `lpcm`（未压缩 PCM）音轨，系统播放器会整条丢弃；播放内核换成 **Media3/ExoPlayer** 后正常出声 |
 | **v1.3** | 实况照片/视频播放**不再黑屏等待**：等到视频首帧就绪才揭开画面，等待期间保留当前图片与 loading 提示 |
 | v1.2 | 登录弹窗新增**扫码登录**：手机填表，电视自动接收并登录 |
 | v1.1 | 视频与实况照片播放（点一次播一次）；键盘 **M** 键等同菜单键；媒体角标 |

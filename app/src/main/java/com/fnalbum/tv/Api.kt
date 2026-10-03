@@ -62,10 +62,31 @@ object Api {
     suspend fun login(acc: Account): Account = withContext(Dispatchers.IO) {
         android.util.Log.i("FnAlbum", "login start ${acc.wsUrl()}")
         val result = withTimeout(25_000) { wsLogin(acc) }
-        android.util.Log.i("FnAlbum", "login ok token=${result.take(8)}...")
+        android.util.Log.i("FnAlbum", "login ok token=<已省略 len=${result.length}>")
         account = acc.copy(token = result)
         token = result
         acc.copy(token = result)
+    }
+
+    /**
+     * 登录报文只记「结构」，绝不落原文。
+     *
+     * 服务端的成功回包里带 `token`，请求里带**明文密码**，任何一处原样打日志
+     * 都等于把用户凭据写进 logcat（`adb logcat` / bugreport 可读）。
+     */
+    private fun logShape(what: String, text: String) {
+        val shape = runCatching {
+            val o = JSONObject(text)
+            buildString {
+                append("len=${text.length}")
+                if (o.has("req")) append(" req=${o.optString("req")}")
+                if (o.has("result")) append(" result=${o.optString("result")}")
+                if (o.has("errno")) append(" errno=${o.optInt("errno")}")
+                if (o.has("pub")) append(" pub=<${o.optString("pub").length} 字符>")
+                if (o.has("token")) append(" token=<已省略>")
+            }
+        }.getOrElse { "len=${text.length}（非 JSON）" }
+        android.util.Log.i("FnAlbum", "$what: $shape")
     }
 
     private suspend fun wsLogin(acc: Account): String = suspendCancellableCoroutine { cont ->
@@ -87,7 +108,7 @@ object Api {
             }
 
             override fun onMessage(webSocket: WebSocket, text: String) {
-                android.util.Log.i("FnAlbum", "ws msg: ${text.take(160)}")
+                logShape("ws msg", text)
                 try {
                     val obj = JSONObject(text)
 
@@ -114,9 +135,11 @@ object Api {
                             put("reqid", "login-" + System.currentTimeMillis())
                         }
                         val (iv, rsa, aes) = FnCrypto.encryptLogin(payload.toString(), pem)
+                        // 只记长度与字段名，不记 payload 原文（里面有明文密码）
                         android.util.Log.i(
                             "FnAlbum",
-                            "payload=$payload ivLen=${iv.length} rsaLen=${rsaLen(rsa)} rsaB64Len=${rsa.length} aesLen=${aes.length}"
+                            "login payload: fields=${payload.keys().asSequence().joinToString(",")} " +
+                                "ivLen=${iv.length} rsaLen=${rsaLen(rsa)} rsaB64Len=${rsa.length} aesLen=${aes.length}"
                         )
                         val envelope = JSONObject().apply {
                             put("req", "encrypted")

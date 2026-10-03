@@ -11,8 +11,8 @@ android {
         applicationId = "com.fnalbum.tv"
         minSdk = 21
         targetSdk = 34
-        versionCode = 4
-        versionName = "1.3"
+        versionCode = 7
+        versionName = "1.3.3"
     }
 
     signingConfigs {
@@ -61,4 +61,7 @@ dependencies {
     implementation("androidx.annotation:annotation:1.8.2")
     // 仅核心编码库，用于把扫码登录地址画成二维码（约 500KB，无 UI 依赖）
     implementation("com.google.zxing:core:3.5.3")
+    // 播放内核：系统 MediaPlayer 解不了动图短片 MOV 里的 lpcm(未压缩 PCM) 音轨，
+    // 换成 Media3/ExoPlayer 的 Mp4Extractor（纯 Kotlin/Java，无 .so）
+    implementation("androidx.media3:media3-exoplayer:1.3.1")
 }

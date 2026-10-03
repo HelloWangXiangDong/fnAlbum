@@ -1,19 +1,32 @@
 package com.fnalbum.tv
 
 import android.app.Activity
-import android.media.MediaPlayer
+import android.content.Context
+import android.media.AudioManager
 import android.net.Uri
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.util.Log
+import android.view.Gravity
 import android.view.KeyEvent
+import android.view.SurfaceView
 import android.view.View
 import android.view.WindowManager
+import android.widget.FrameLayout
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ProgressBar
 import android.widget.TextView
-import android.widget.VideoView
+import androidx.media3.common.AudioAttributes
+import androidx.media3.common.C
+import androidx.media3.common.MediaItem
+import androidx.media3.common.PlaybackException
+import androidx.media3.common.Player
+import androidx.media3.common.VideoSize
+import androidx.media3.datasource.DefaultHttpDataSource
+import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import coil.imageLoader
 import coil.load
 import coil.request.ImageRequest
@@ -33,10 +46,15 @@ import kotlinx.coroutines.launch
  *
  * 加载体验：准备阶段**不揭开播放画面**，静态图一直留在屏幕上、中间转一个 loading，
  * 等首帧真正渲染出来才切换过去，避免黑屏好几秒。
+ *
+ * 播放内核用 Media3/ExoPlayer，而不是系统 `VideoView`：动图短片是 MOV 容器 +
+ * `lpcm`（未压缩 PCM）音轨，系统 MediaPlayer 会把这条音轨整条丢掉（画面正常、
+ * 完全无声）；ExoPlayer 的 Mp4Extractor 认得这种抽样条目，能正常出声。
  */
 class ViewerActivity : Activity() {
 
     private companion object {
+        const val TAG = "FnAlbumTV"
         const val VIEW_SIZE = "m"
         const val CHROME_TIMEOUT = 3200L
 
@@ -48,7 +66,7 @@ class ViewerActivity : Activity() {
     }
 
     private lateinit var img: ImageView
-    private lateinit var video: VideoView
+    private lateinit var video: SurfaceView
     private lateinit var progress: ProgressBar
     private lateinit var infoBar: View
     private lateinit var badgeBox: LinearLayout
@@ -76,6 +94,9 @@ class ViewerActivity : Activity() {
 
     /** 当前条目是否需要显示右上角媒体角标 */
     private var badgeVisible = false
+
+    /** 当前播放器。每次播放都新建一个，播完/换图立刻 release */
+    private var player: ExoPlayer? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -209,8 +230,8 @@ class ViewerActivity : Activity() {
      * 视频与动图共用同一条媒体流（/api/v1/stream/v/{id}）。
      *
      * 关键点：**准备阶段不揭开画面**。加载过程中静态图一直留在屏幕上，只在中间转一个
-     * loading；等首帧真正渲染出来才把静态图收掉。这样就不会先露出 VideoView 的黑底、
-     * 黑屏好几秒。静态图能盖住视频，靠的是布局里 VideoView 排在静态图下面。
+     * loading；等首帧真正渲染出来才把静态图收掉。这样就不会先露出播放面的黑底、
+     * 黑屏好几秒。静态图能盖住视频，靠的是布局里播放面排在静态图下面。
      */
     private fun playOnce() {
         val photo = currentPhoto() ?: return
@@ -219,51 +240,164 @@ class ViewerActivity : Activity() {
         val url = Api.mediaUrl(photo)
         if (url.isEmpty()) return
 
-        // 每次重播都从零开始
+        // 每次重播都从零开始：先停掉上一次的播放器
         stopPlayback()
 
         playing = true
         revealed = false
-        // VideoView 必须是 VISIBLE：SurfaceView 不可见时不会创建 surface，
-        // prepareAsync 也就不会被调用。它在布局里位于静态图下方，所以看不见。
+        // 播放面必须先恢复成整屏：SurfaceView 不可见时不会创建 surface，
+        // 一帧都不会被渲染出来。它在布局里位于静态图下方，所以看不见。
         progress.visibility = View.VISIBLE
         img.visibility = View.VISIBLE
         video.visibility = View.VISIBLE
+        resetVideoSize()
 
-        video.setOnPreparedListener { mp ->
-            if (!playing) return@setOnPreparedListener
-            mp.isLooping = false
-            video.start()
-            // 兜底：MEDIA_INFO_VIDEO_RENDERING_START 不是所有片源 / 设备都会上报
-            handler.removeCallbacks(revealFallback)
-            handler.postDelayed(revealFallback, REVEAL_FALLBACK_MS)
-        }
-        video.setOnInfoListener { _, what, _ ->
-            if (what == MediaPlayer.MEDIA_INFO_VIDEO_RENDERING_START) revealVideo()
-            false
-        }
-        video.setOnCompletionListener {
-            // 播完即止，回到静态图
-            stopPlayback()
-            showChrome()
-        }
-        video.setOnErrorListener { _, what, extra ->
-            failedId = photo.id
-            stopPlayback()
-            tvHint.text = "播放失败（错误 $what/$extra）"
-            showChrome()
-            true
-        }
+        val p = newPlayer()
+        player = p
+        p.addListener(object : Player.Listener {
+            override fun onRenderedFirstFrame() {
+                if (playing && player === p) revealVideo()
+            }
+
+            // 裸 SurfaceView 会把解码帧硬拉满整个 surface（= 拉伸变形），
+            // 必须自己按片源比例把播放面缩进来，多出来的地方留黑边
+            override fun onVideoSizeChanged(videoSize: VideoSize) {
+                if (player !== p) return
+                fitVideo(videoSize)
+            }
+
+            override fun onPlaybackStateChanged(playbackState: Int) {
+                if (!playing || player !== p) return
+                when (playbackState) {
+                    // 兜底：万一首帧回调没上报，也别让 loading 一直转
+                    Player.STATE_READY -> {
+                        logAudioState(p)
+                        handler.removeCallbacks(revealFallback)
+                        handler.postDelayed(revealFallback, REVEAL_FALLBACK_MS)
+                    }
+
+                    // 播完即止，回到静态图，不循环
+                    Player.STATE_ENDED -> {
+                        stopPlayback()
+                        showChrome()
+                    }
+                }
+            }
+
+            override fun onPlayerError(error: PlaybackException) {
+                if (player !== p) return
+                failedId = photo.id
+                Log.w(TAG, "播放失败：${error.errorCodeName}", error)
+                stopPlayback()
+                tvHint.text = "播放失败（${error.errorCodeName}）"
+                showChrome()
+            }
+        })
+
+        p.setMediaItem(MediaItem.fromUri(Uri.parse(url)))
+        p.prepare()
+        p.playWhenReady = true
 
         handler.removeCallbacks(prepareTimeout)
         handler.postDelayed(prepareTimeout, PREPARE_TIMEOUT)
+    }
 
-        runCatching { video.setVideoURI(Uri.parse(url), Api.mediaHeaders()) }
-            .onFailure {
-                failedId = photo.id
-                stopPlayback()
-                tvHint.text = "播放失败：${it.message}"
+    /** 新建一个播放器。媒体流只校验 AccessToken，不需要 authx 签名 */
+    private fun newPlayer(): ExoPlayer {
+        val dataSource = DefaultHttpDataSource.Factory()
+            .setDefaultRequestProperties(Api.mediaHeaders())
+            .setConnectTimeoutMs(15_000)
+            .setReadTimeoutMs(15_000)
+            .setAllowCrossProtocolRedirects(true)
+
+        return ExoPlayer.Builder(this)
+            .setMediaSourceFactory(DefaultMediaSourceFactory(dataSource))
+            .build()
+            .apply {
+                // 显式声明走系统媒体流，避免默认音频属性在某些盒子上不路由输出
+                setAudioAttributes(
+                    AudioAttributes.Builder()
+                        .setUsage(C.USAGE_MEDIA)
+                        .setContentType(C.AUDIO_CONTENT_TYPE_MOVIE)
+                        .build(),
+                    /* handleAudioFocus = */ true
+                )
+                setVideoSurfaceView(video)
             }
+    }
+
+    /** 播放面恢复成整屏（下次播放前重置上一支片源留下的尺寸） */
+    private fun resetVideoSize() {
+        val lp = video.layoutParams as? FrameLayout.LayoutParams ?: return
+        lp.width = FrameLayout.LayoutParams.MATCH_PARENT
+        lp.height = FrameLayout.LayoutParams.MATCH_PARENT
+        lp.gravity = Gravity.CENTER
+        video.layoutParams = lp
+    }
+
+    /**
+     * 按片源比例把播放面缩进屏幕内，等比例居中，多出来的地方留黑边。
+     *
+     * 系统 `VideoView` 的 `onMeasure` 会自动做这件事，换成裸 `SurfaceView` 就没有了 ——
+     * 不处理的话解码帧会被硬拉满整个 surface，画面横向/纵向拉伸变形。
+     */
+    private fun fitVideo(videoSize: VideoSize) {
+        var vw = videoSize.width
+        var vh = videoSize.height
+        // 解码器没应用旋转的话，这里要自己把宽高换过来
+        if (videoSize.unappliedRotationDegrees == 90 || videoSize.unappliedRotationDegrees == 270) {
+            val t = vw; vw = vh; vh = t
+        }
+        if (vw <= 0 || vh <= 0) return
+
+        val videoAspect = vw * videoSize.pixelWidthHeightRatio / vh
+        val screenW = screenW().toFloat()
+        val screenH = screenH().toFloat()
+        if (videoAspect <= 0f || screenW <= 0f || screenH <= 0f) return
+
+        var w = screenW
+        var h = screenH
+        if (videoAspect > screenW / screenH) {
+            h = screenW / videoAspect        // 片源更宽 → 上下留黑边
+        } else {
+            w = screenH * videoAspect        // 片源更高 → 左右留黑边
+        }
+
+        val lp = video.layoutParams as? FrameLayout.LayoutParams ?: return
+        val tw = w.toInt()
+        val th = h.toInt()
+        if (lp.width == tw && lp.height == th) return
+        lp.width = tw
+        lp.height = th
+        lp.gravity = Gravity.CENTER
+        video.layoutParams = lp
+    }
+
+    /**
+     * 播放器就绪后把整条音频链路的状态写进 logcat（**不上屏**），
+     * 用来区分「没声音」是 App 侧还是设备侧：
+     *
+     *   adb logcat -s FnAlbumTV:I
+     *
+     * 重点看两处：系统媒体音量是不是 0 / 被静音，输出设备是不是你以为的那个（电视/耳机）。
+     */
+    private fun logAudioState(p: ExoPlayer) {
+        val groups = p.currentTracks.groups
+        val audioGroups = groups.count { it.type == C.TRACK_TYPE_AUDIO }
+        val selected = groups.count { it.type == C.TRACK_TYPE_AUDIO && it.isSelected }
+
+        val am = getSystemService(Context.AUDIO_SERVICE) as? AudioManager
+        val vol = am?.getStreamVolume(AudioManager.STREAM_MUSIC) ?: -1
+        val maxVol = am?.getStreamMaxVolume(AudioManager.STREAM_MUSIC) ?: -1
+        val muted = am?.isStreamMute(AudioManager.STREAM_MUSIC) ?: false
+        val outs = am?.getDevices(AudioManager.GET_DEVICES_OUTPUTS)
+            ?.joinToString("|") { "${it.type}:${it.productName}" } ?: "-"
+
+        Log.i(
+            TAG,
+            "音频链路 音轨组=$audioGroups 已选=$selected player音量=${p.volume} " +
+                "会话=${p.audioSessionId} 系统媒体音量=$vol/$maxVol 静音=$muted 输出设备=$outs"
+        )
     }
 
     /** 首帧已经画出来了：这时才收掉静态图，让视频画面露出来（幂等） */
@@ -288,17 +422,20 @@ class ViewerActivity : Activity() {
         handler.removeCallbacks(revealFallback)
         handler.removeCallbacks(prepareTimeout)
         revealed = false
-        if (!playing && video.visibility != View.VISIBLE) return
         playing = false
-        // 清掉监听，避免迟到的回调又把播放拉起来
-        video.setOnPreparedListener(null)
-        video.setOnInfoListener(null)
-        video.setOnCompletionListener(null)
-        video.setOnErrorListener(null)
-        runCatching { video.stopPlayback() }
+
+        // release 会把挂在播放器上的监听一并断开，迟到的回调不会再触发
+        val p = player
+        player = null
+        if (p != null) runCatching {
+            p.stop()
+            p.release()
+        }
+
+        // 先把静态图放回来，再收掉播放面，避免中间闪一帧黑
+        img.visibility = View.VISIBLE
         video.visibility = View.GONE
         progress.visibility = View.GONE
-        img.visibility = View.VISIBLE
     }
 
     // -------------------------------------------------------------- 信息栏
